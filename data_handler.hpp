@@ -2,6 +2,7 @@
 #define __DATA_HANDLER_HPP
 
 #include "data.hpp"
+#include "common.hpp"
 #include <vector>
 #include <cstdint>
 #include <string>
@@ -25,6 +26,7 @@ class data_handler {
     const double VALIDATION_DATA_SET_PERCENTAGE = 0.20;
 
 public:
+    common cd;
     data_handler();
     ~data_handler();
 
@@ -37,6 +39,7 @@ public:
     std::vector<data *> *get_training_data();
     std::vector<data *> *get_testing_data();
     std::vector<data *> *get_validation_data();
+    std::unordered_map<std::string, int>& get_class_map();
 };
 
 #endif

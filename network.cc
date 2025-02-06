@@ -4,6 +4,9 @@
 #include <stdexcept>
 #include <string>
 #include <algorithm>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 network::network(std::vector<int> *spec, int input_size, int num_classes, double learning_rate) {
     this->input_size = input_size;
@@ -35,7 +38,7 @@ network::network(std::vector<int> *spec, int input_size, int num_classes, double
     //std::cout << "Pooled output size from ConvLayer: " << pooled_output_size << std::endl;
 
     // Set up chunking for RNN input size if necessary
-    int chunk_size = 8192;  // Adjust chunk size based on available resources
+    int chunk_size = 32768;  // Adjust chunk size based on available resources
     int num_chunks = pooled_output_size / chunk_size;
     int remaining_elements = pooled_output_size % chunk_size;
 
@@ -76,21 +79,19 @@ network::~network() {
 std::vector<double>* network::fprop(data* d) {
     std::vector<double>* input = new std::vector<double>(d->get_feature_vector().begin(), d->get_feature_vector().end());
 
-    std::cout << "Forward Pass | Initial Feature Vector Size: " << input->size() << std::endl;
-
     for (int i = 0; i < layers->size(); ++i) {
         layer* current_layer = (*layers)[i];
 
         //std::cout << "Layer " << i << " - Input Size: " << input->size() << std::endl;
 
         if (RNNLayer* rnn_layer = dynamic_cast<RNNLayer*>(current_layer)) {
-            std::cout << "Processing RNNLayer" << std::endl;
+            //std::cout << "Processing RNNLayer" << std::endl;
 
             // Use RNNLayer's input_size to determine chunk size
             int chunk_size = rnn_layer->input_size;
             int calculated_chunks = (input->size() + chunk_size - 1) / chunk_size;
 
-            std::cout << "Calculated chunks: " << calculated_chunks << std::endl;
+            //std::cout << "Calculated chunks: " << calculated_chunks << std::endl;
 
             // Set num_chunks
             cd->set_num_chunks(&calculated_chunks);
@@ -187,7 +188,7 @@ void network::bprop(data* d) {
     std::vector<double>* d_next = gradients;
     for (int i = layers->size() - 1; i >= 0; i--) {
         layer* current_layer = (*layers)[i];
-        std::cout << "[bprop] Backward pass for layer " << i << std::endl;
+        //std::cout << "[bprop] Backward pass for layer " << i << std::endl;
         d_next = current_layer->backward(d_next);
         if (!d_next) {
             std::cerr << "[bprop] Error: Backward pass failed at layer " << i << "!" << std::endl;
@@ -240,12 +241,13 @@ double network::transfer_derivative(double output) {
 
 int network::predict(data* d) {
     std::vector<double>* output = fprop(d);
+    if (!output || output->empty()) {
+        throw std::runtime_error("predict: fprop returned an empty or null output.");
+    }
     int predicted_class = std::distance(output->begin(), std::max_element(output->begin(), output->end()));
     delete output;
     return predicted_class;
 }
-
-
 
 // Training: Pass data through the network, forward pass only for now
 void network::train(int epochs, double validation_threshold) {
@@ -253,49 +255,46 @@ void network::train(int epochs, double validation_threshold) {
         std::cerr << "Error: Training data is empty!" << std::endl;
         return;
     }
-    
+
+    int total_samples = common_training_data->size();
+
     for (int epoch = 0; epoch < epochs; ++epoch) {
         double total_loss = 0.0;
         int sample_count = 0;
-        
-        // Optionally turn down the verbosity for per-sample logs
-        // For example, you might comment out debug prints in fprop and bprop
-        for (data* d : *common_training_data) {
-            // Forward pass
+
+        std::cout << "\nEpoch " << (epoch + 1) << "/" << epochs << " - Training...\n";
+
+        for (size_t i = 0; i < total_samples; ++i) {
+            data* d = common_training_data->at(i);
             std::vector<double>* output = fprop(d);
             if (!output) continue;
-            
-            // Determine the target class from d->get_class_vector()
+
             int class_id = std::distance(d->get_class_vector().begin(),
                                          std::max_element(d->get_class_vector().begin(), d->get_class_vector().end()));
-            
-            // Calculate sample loss using the numerically stable loss function
             double sample_loss = calculate_loss(*output, class_id);
             total_loss += sample_loss;
             sample_count++;
-            
-            // Backward pass
+
             bprop(d);
-            std::cout << "After Bprop in train" << std::endl;
-            // Weight update (if not integrated inside bprop, call update_weights)
             update_weights(d);
-            
-            // Clean up sample output if allocated on heap
             delete output;
+
+            // ✅ Update progress bar for training
+            cd->show_progress_bar("Training", i + 1, total_samples);
         }
-        
-        double average_loss = total_loss / sample_count;
-        std::cout << "Epoch " << (epoch + 1) << "/" << epochs 
-                  << " - Average Loss: " << average_loss << std::endl;
-        
-        // Validate on validation set, if desired, and possibly break early
+
+        double avg_loss = total_loss / sample_count;
+        std::cout << "\nEpoch " << (epoch + 1) << " complete. Average Loss: " << avg_loss << std::endl;
+
+        // ✅ Run Validation Progress Bar
         double validation_accuracy = 0.0;
-        for (data* vd : *common_validation_data) {
-            validation_accuracy += validate(vd);
+        for (size_t i = 0; i < common_validation_data->size(); ++i) {
+            validation_accuracy += validate(common_validation_data->at(i));
+            cd->show_progress_bar("Validating", i + 1, common_validation_data->size());
         }
         validation_accuracy /= common_validation_data->size();
-        std::cout << "Validation Accuracy: " << validation_accuracy * 100 << "%" << std::endl;
-        
+        std::cout << "\nValidation Accuracy: " << validation_accuracy * 100 << "%\n";
+
         if (validation_accuracy >= validation_threshold) {
             std::cout << "Stopping early due to high validation accuracy." << std::endl;
             break;
@@ -412,25 +411,25 @@ double network::test() {
     }
 
     int correct = 0;
-    int total = 0;
+    int total = common_testing_data->size();
 
-    for (data* d : *common_testing_data) {
-        // Get predicted class using the updated predict function
+    std::cout << "\nRunning tests...\n";
+
+    for (size_t i = 0; i < total; ++i) {
+        data* d = common_testing_data->at(i);
         int predicted_class = predict(d);
+        int actual_class_id = std::distance(d->get_class_vector().begin(),
+                                            std::max_element(d->get_class_vector().begin(), d->get_class_vector().end()));
 
-        // Retrieve the actual class ID for this data point
-        int actual_class_id = std::distance(d->get_class_vector().begin(),std::max_element(d->get_class_vector().begin(), d->get_class_vector().end()));
+        if (predicted_class == actual_class_id) correct++;
 
-
-        // Check if the prediction is correct
-        if (predicted_class == actual_class_id) {
-            correct++;
-        }
-        total++;
+        // ✅ Update progress bar for testing
+        cd->show_progress_bar("Testing", i + 1, total);
     }
 
-    // Return the accuracy as the ratio of correct predictions
-    return static_cast<double>(correct) / total;
+    double accuracy = static_cast<double>(correct) / total;
+    std::cout << "\nTest Accuracy: " << accuracy * 100 << "%\n";
+    return accuracy;
 }
 
 void network::output_predictions(const std::string &filename, data_handler *dh) {
@@ -455,41 +454,111 @@ double network::calculate_loss(const std::vector<double>& logits, int class_id) 
     return loss;
 }
 
+void network::process_video_frames(const std::string& directory, data_handler *dh) {
+    std::vector<std::pair<std::string, std::pair<int, int>>> events;
+    std::string current_label = "";
+    int start_time = 0, frame_rate = 30; // Assuming 30 FPS
+    int frame_count = 0;
+
+    for (const auto& entry : fs::directory_iterator(directory)) {
+        std::string frame_path = entry.path().string();
+        
+        // Load frame into feature vector
+        std::ifstream frame_file(frame_path, std::ios::binary);
+        if (!frame_file) {
+            std::cerr << "Could not open frame: " << frame_path << std::endl;
+            continue;
+        }
+
+        std::vector<uint8_t> feature_vector(480 * 270);
+        frame_file.read(reinterpret_cast<char*>(feature_vector.data()), feature_vector.size());
+        frame_file.close();
+
+        data d;
+        d.set_feature_vector(feature_vector);
+
+        // 🔹 Run inference
+        std::vector<double>* output = fprop(&d);
+        if (!output) {
+            std::cerr << "Error: fprop() returned null output!" << std::endl;
+            continue;
+        }
+
+        // 🔹 Get predicted class index
+        int predicted_class = std::distance(output->begin(), std::max_element(output->begin(), output->end()));
+
+        // 🔹 Retrieve the actual class name using `get_class_map()`
+        std::string predicted_label = "UNKNOWN";
+        for (const auto& pair : dh->get_class_map()) {
+            if (pair.second == predicted_class) {
+                predicted_label = pair.first;  // Get the class name
+                break;
+            }
+        }
+
+        // 🔹 Debug: Print results
+        std::cout << "Frame " << frame_count << " | Predicted class index: " << predicted_class
+                  << " | Mapped label: " << predicted_label << std::endl;
+
+        // 🔹 Convert frame count to seconds
+        int current_time = frame_count / frame_rate;
+
+        // 🔹 Check if label changed
+        if (predicted_label != current_label) {
+            if (!current_label.empty() && current_time > start_time) {
+                events.emplace_back(current_label, std::make_pair(start_time, current_time));
+                std::cout << current_label << " " << start_time << "-" << current_time << "s" << std::endl;
+            }
+            current_label = predicted_label;
+            start_time = current_time;
+        }
+
+        frame_count++;
+        delete output; // Clean up output vector
+    }
+
+    // 🔹 Save the last detected event
+    if (!current_label.empty()) {
+        events.emplace_back(current_label, std::make_pair(start_time, frame_count / frame_rate));
+        std::cout << current_label << " " << start_time << "-" << (frame_count / frame_rate) << "s" << std::endl;
+    }
+}
+
 // In Main
 int main() {
     try {
-        // Initialize the data handler
-        data_handler *dh = new data_handler();
         std::string data_path = "C:\\Users\\cyber\\Downloads\\Hybrid2-main\\Hybrid2-main\\polyphia.data";
+        std::string model_path = "trained_model.bin";
+        std::string video_directory = "C:\\Users\\cyber\\Downloads\\Hybrid2-main\\Hybrid2-main\\output_frames";
 
+        // Load the data file
+        data_handler *dh = new data_handler();
         dh->read_data(data_path);
         dh->split_data();
+        int class_num = dh->get_class_counts();
+        std::cout << "Class count: " << class_num << std::endl;
 
-        // Initialize the network
-        std::vector<int> *spec = new std::vector<int>{128, 64, 8};
-        network *net = new network(spec, dh->get_training_data()->at(0)->get_feature_vector().size(), 8, 0.01);
+        // Initialize network
+        std::vector<int> *spec = new std::vector<int>{128, 64, class_num};
+        network *net = new network(spec, dh->get_training_data()->at(0)->get_feature_vector().size(), class_num, 0.01);
 
-        // Set debug output file
-        net->set_debug_output("debug_output.txt");
+        if (std::ifstream(model_path)) {
+            std::cout << "Loading pre-trained model..." << std::endl;
+            net->load_model(model_path);
+        } else {
+            net->set_common_training_data(dh->get_training_data());
+            net->set_common_testing_data(dh->get_testing_data());
+            net->set_common_validation_data(dh->get_validation_data());
 
-        // Assign the split data to the network's inherited common_data members
-        net->set_common_training_data(dh->get_training_data());
-        net->set_common_testing_data(dh->get_testing_data());
-        net->set_common_validation_data(dh->get_validation_data());
+            std::cout << "Starting training..." << std::endl;
+            net->train(10, 0.98);
+            std::cout << "Saving trained model..." << std::endl;
+            net->save_model(model_path);
+        }
 
-        // Train the network
-        std::cout << "Starting training..." << std::endl;
-        net->train(10, 0.98);  // Train for 10 epochs
+        // Run inference on video frames
+        net->process_video_frames(video_directory, dh);
 
-        // Save the trained model
-        net->save_model("trained_model.bin");
-        std::cout << "Model saved successfully." << std::endl;
-
-        // Test the model on test data
-        double test_accuracy = net->test();
-        std::cout << "Test Accuracy: " << test_accuracy << std::endl;
-
-        // Cleanup
         delete dh;
         delete net;
         delete spec;

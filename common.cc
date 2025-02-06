@@ -1,4 +1,5 @@
 #include "../include/common.hpp"
+#include <iomanip>
 
 void common::initialize_matrix(std::vector<std::vector<double>>& matrix, int rows, int cols) {
     matrix.resize(rows, std::vector<double>(cols));
@@ -73,3 +74,22 @@ void common::set_num_chunks(int* chunk_count_ptr) {
     num_chunks = *chunk_count_ptr;
     //std::cout << "num_chunks successfully set to: " << num_chunks << std::endl;
 }
+
+void common::show_progress_bar(const std::string& task, int current, int total) {
+    if (total == 0) return; // Prevent division by zero
+    const int bar_width = 50;
+    float progress = static_cast<float>(current) / total;
+    int filled = static_cast<int>(progress * bar_width);
+
+    std::cout << "\r[";
+    for (int i = 0; i < bar_width; i++) {
+        if (i < filled) std::cout << "=";
+        else std::cout << " ";
+    }
+    std::cout << "] " << std::fixed << std::setprecision(1) << (progress * 100) << "% "
+              << task << " (" << current << "/" << total << ")"
+              << std::flush;
+
+    if (current == total) std::cout << std::endl; // Newline at completion
+}
+

@@ -30,6 +30,8 @@ class common{
 
         int get_num_chunks() const;
         void set_num_chunks(int* chunk_count_ptr);
+
+        void show_progress_bar(const std::string& task, int current, int total);
 };
 
 #endif

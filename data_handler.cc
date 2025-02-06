@@ -1,6 +1,9 @@
 #include "../include/data_handler.hpp"
 #include <algorithm>
+#include <filesystem>
 #include <random>
+
+
 
 data_handler::data_handler() {
     data_array = new std::vector<data *>;
@@ -25,19 +28,19 @@ void data_handler::read_data(const std::string& data_path) {
     }
 
     feature_vector_size = 480 * 270;  // Grayscale, known resolution
+    int frame_count = 0;
 
     while (true) {
         auto feature_vector = new std::vector<uint8_t>(feature_vector_size);
         data_file.read(reinterpret_cast<char*>(feature_vector->data()), feature_vector_size);
         
-        // Check if the expected number of bytes was read
         if (data_file.gcount() != static_cast<std::streamsize>(feature_vector_size)) {
-            delete feature_vector;  // Clean up the allocated vector
-            break;  // Exit loop if incomplete data is encountered
+            delete feature_vector;
+            break;
         }
 
         std::string label;
-        std::getline(data_file, label);  // Read label until newline
+        std::getline(data_file, label);  
 
         if (!class_map.count(label)) {
             class_map[label] = class_counts++;
@@ -52,20 +55,20 @@ void data_handler::read_data(const std::string& data_path) {
         d->set_class_vector(*class_vector);
 
         data_array->push_back(d);
+        frame_count++;
+
+        // Show progress
     }
 
     data_file.close();
-    std::cout << "Successfully loaded " << data_array->size() << " images into the data array." << std::endl;
+    std::cout << "\nSuccessfully loaded " << data_array->size() << " images." << std::endl;
 }
 
 void data_handler::split_data() {
     int train_size = data_array->size() * TRAINING_DATA_SET_PERCENTAGE;
     int test_size = data_array->size() * TESTING_DATA_SET_PERCENTAGE;
-    // int val_size = data_array->size() * VALIDATION_DATA_SET_PERCENTAGE; // Not used below
 
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(data_array->begin(), data_array->end(), g);
+    // 🔹 REMOVE `shuffle()` to keep the sequence intact
 
     training_data->assign(data_array->begin(), data_array->begin() + train_size);
     testing_data->assign(data_array->begin() + train_size, data_array->begin() + train_size + test_size);
@@ -76,8 +79,15 @@ void data_handler::split_data() {
               << ", Validation Data: " << validation_data->size() << std::endl;
 }
 
-
 std::vector<data *> *data_handler::get_data_array() { return data_array; }
 std::vector<data *> *data_handler::get_training_data() { return training_data; }
 std::vector<data *> *data_handler::get_testing_data() { return testing_data; }
 std::vector<data *> *data_handler::get_validation_data() { return validation_data; }
+
+int data_handler::get_class_counts(){
+    return class_counts;
+}
+
+std::unordered_map<std::string, int>& data_handler::get_class_map(){
+    return class_map;
+}

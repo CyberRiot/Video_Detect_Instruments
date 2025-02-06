@@ -43,5 +43,6 @@ public:
     void set_debug_output(const std::string &filename);
     void close_debug_output();
     double calculate_loss(const std::vector<double>& logits, int class_id);
+    void process_video_frames(const std::string& directory, data_handler *dh);
 };
 #endif

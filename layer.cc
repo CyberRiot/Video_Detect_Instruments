@@ -115,7 +115,7 @@ std::vector<double>* ConvLayer::forward(std::vector<double>* input) {
     
     // We want each filter to produce a pooled feature map of 8x8.
     // Therefore, choose pool_size = stride = 44 (since 44*8 = 352, which is close to 358).
-    int pool_size = 44;  
+    int pool_size = 22;  
     int pooled_side = output_side / pool_size; // floor(358/44) = floor(8.136) = 8
     
     // We'll collect the pooled outputs from each filter.
@@ -167,10 +167,10 @@ std::vector<double>* ConvLayer::forward(std::vector<double>* input) {
         pooled_all.insert(pooled_all.end(), pooled.begin(), pooled.end());
     }
     
-    std::cout << "Forward Pass: image " << image_size << "x" << image_size 
+    /*std::cout << "Forward Pass: image " << image_size << "x" << image_size 
               << ", conv output " << output_side << "x" << output_side 
               << ", pooled " << pooled_side << "x" << pooled_side
-              << ", total pooled vector size: " << pooled_all.size() << std::endl;
+              << ", total pooled vector size: " << pooled_all.size() << std::endl;*/
     // Expected pooled_all size: num_filters * (8*8) = 128 * 64 = 8192
     
     return new std::vector<double>(pooled_all);
@@ -195,7 +195,7 @@ std::vector<double>* ConvLayer::backward(std::vector<double>* d_out) {
     
     int image_size = static_cast<int>(std::sqrt(this->input->size())); // 360
     int output_side = image_size - filter_size + 1; // 358
-    int pool_size = 44;  // In backward, we use the same pooling parameters that produced 8x8 output.
+    int pool_size = 22;
     int pooled_side = output_side / pool_size; // floor(358/44)= floor(8.136)= 8
 
     // Check that d_out size is as expected.
